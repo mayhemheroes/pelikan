@@ -1,33 +1,24 @@
-# -----------------
-# Cargo Build Stage
-# -----------------
+# Build Stage
+FROM ubuntu:20.04 as builder
 
-FROM rust:latest as cargo-build
+## Install build dependencies.
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y cmake clang curl
+RUN curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+RUN ${HOME}/.cargo/bin/rustup default nightly
+RUN ${HOME}/.cargo/bin/cargo install -f cargo-fuzz
 
-COPY . .
-RUN apt-get update
-RUN apt-get install -y cmake
-RUN apt-get install -y clang
-RUN mkdir .cargo
-RUN cargo vendor > .cargo/config
+## Add source code to the build stage.
+ADD . /pelikan
+WORKDIR /pelikan
 
-RUN cargo build --release
+RUN cd src/rust/protocol/ping/fuzz && ${HOME}/.cargo/bin/cargo fuzz build
 
-# -----------------
-# Run Momento Proxy
-# -----------------
+# Package Stage
+FROM ubuntu:20.04
 
-FROM debian:stable-slim
+COPY --from=builder pelikan/src/rust/protocol/ping/fuzz/target/x86_64-unknown-linux-gnu/release/ping /
 
-WORKDIR /app
 
-ENV MOMENTO_AUTHENTICATION=""
-ENV CONFIG="momento_proxy.toml"
 
-RUN mkdir config
 
-COPY --from=cargo-build ./target/release/momento_proxy .
-COPY --from=cargo-build ./config/momento_proxy.toml ./config
-
-RUN chmod +x ./momento_proxy
-CMD ./momento_proxy ./config/${CONFIG}
